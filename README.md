@@ -1,36 +1,86 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# chatfn
 
-## Getting Started
+Private chatrooms with Redis-backed storage and expiring rooms.
 
-First, run the development server:
+## Features
+
+- Create a room and share a short invite code or URL.
+- Join by pasting a full link or the room code.
+- Messages are stored in Redis and automatically trimmed.
+- Live chat uses WebSockets for real-time updates.
+- API routes are powered by Elysia and mounted under Next.js.
+- Rooms expire automatically based on TTL.
+
+## Requirements
+
+- Node.js 20+
+- pnpm (or npm/yarn)
+- Redis 7+
+
+## Quick Start (local)
+
+1. Install dependencies:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Start Redis (Docker example):
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+docker run --name chatfn-redis -p 6379:6379 -d redis:7
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+3. Add environment variables:
 
-## Learn More
+Create `.env.local` in the project root:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+REDIS_URL=redis://localhost:6379
+ROOM_TTL_SECONDS=86400
+MESSAGE_LIMIT=200
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+4. Run the app:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+pnpm dev
+```
 
-## Deploy on Vercel
+Open http://localhost:3000
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Production (self-hosted)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Build and start:
+
+```bash
+pnpm build
+pnpm start
+```
+
+2. Set environment variables on your host:
+
+- `REDIS_URL`: Redis connection string.
+- `ROOM_TTL_SECONDS`: Room and message TTL in seconds.
+- `MESSAGE_LIMIT`: Max number of messages stored per room.
+- `PORT`: Server port (default 3000).
+
+## Usage
+
+- Visit `/room` to create or join a room.
+- Share the invite button from inside the room.
+- Messages expire with the room TTL (default 24 hours).
+
+## API (Elysia)
+
+The Elysia app is mounted at `/api` via a catch-all Next.js route.
+
+- `POST /api/rooms` → `{ roomId }`
+- `GET /api/rooms/:roomId` → `{ room }`
+- `GET /api/rooms/:roomId/messages` → `{ messages }`
+- `POST /api/rooms/:roomId/messages` → `{ message }`
+
+## Notes
+
+- Usernames are stored in localStorage on the client.
+- Rooms without activity are removed automatically by Redis TTL.

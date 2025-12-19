@@ -1,5 +1,5 @@
 import RoomLobby from "@/components/room-lobby";
 
-export default function Home() {
+export default function RoomPage() {
   return <RoomLobby />;
 }
