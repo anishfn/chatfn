@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { addMessage, createRoom, getRoom, listMessages } from "@/lib/rooms";
+import { addMessage, createRoom, getRoom, getRoomWithMessages } from "@/lib/rooms";
 import { randomUUID } from "crypto";
 import { getRequestIp } from "@/server/ip";
 import { rateLimit } from "@/server/rate-limit";
@@ -79,14 +79,13 @@ export const app = new Elysia()
     },
   )
   .get("/rooms/:roomId/messages", async ({ params, set }) => {
-    const room = await getRoom(params.roomId);
-    if (!room) {
+    const result = await getRoomWithMessages(params.roomId);
+    if (!result) {
       set.status = 404;
       return { error: "Room not found." };
     }
 
-    const messages = await listMessages(params.roomId);
-    return { messages };
+    return { messages: result.messages };
   })
   .post(
     "/rooms/:roomId/messages",

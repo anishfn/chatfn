@@ -12,10 +12,17 @@ export async function rateLimit(key: string, limit: number, windowSeconds: numbe
   }
 
   const redis = await getRedis();
-  const countRaw = await redis.incr(key);
-  if (countRaw === 1) {
-    await redis.expire(key, windowSeconds);
-  }
+  const countRaw = await redis.eval(
+    `
+    local current = redis.call("INCR", KEYS[1])
+    if current == 1 then
+      redis.call("EXPIRE", KEYS[1], tonumber(ARGV[1]))
+    end
+    return current
+    `,
+    [key],
+    [windowSeconds],
+  );
 
   const count = Number(countRaw);
   const remaining = Math.max(0, limit - count);

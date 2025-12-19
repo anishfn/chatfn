@@ -46,7 +46,6 @@ export async function createRoom(createdBy: string) {
     });
 
     if (result) {
-      await redis.expire(messagesKey(roomId), ROOM_TTL_SECONDS);
       return payload;
     }
   }
@@ -64,27 +63,41 @@ export async function getRoom(roomId: string) {
   return raw as ChatRoom;
 }
 
-export async function listMessages(roomId: string) {
+export async function getRoomWithMessages(roomId: string) {
   const redis = await getRedis();
-  const entries = await redis.lrange<string>(messagesKey(roomId), 0, -1);
-  return entries.map((entry) => {
+  const pipeline = redis.pipeline();
+  pipeline.get<string>(roomKey(roomId));
+  pipeline.lrange<string>(messagesKey(roomId), 0, -1);
+  const [roomRaw, entriesRaw] = await pipeline.exec();
+  if (!roomRaw) return null;
+
+  const room = typeof roomRaw === "string" ? (JSON.parse(roomRaw) as ChatRoom) : (roomRaw as ChatRoom);
+  const entries = Array.isArray(entriesRaw) ? entriesRaw : [];
+  const messages = entries.map((entry) => {
     if (typeof entry === "string") {
       return JSON.parse(entry) as ChatMessage;
     }
     return entry as ChatMessage;
   });
+
+  return { room, messages };
 }
 
 export async function addMessage(roomId: string, message: ChatMessage) {
   const redis = await getRedis();
-  const exists = await redis.exists(roomKey(roomId));
-  if (!exists) return false;
-
-  const pipeline = redis.pipeline();
-  pipeline.rpush(messagesKey(roomId), JSON.stringify(message));
-  pipeline.ltrim(messagesKey(roomId), -MESSAGE_LIMIT, -1);
-  pipeline.expire(messagesKey(roomId), ROOM_TTL_SECONDS);
-  pipeline.expire(roomKey(roomId), ROOM_TTL_SECONDS);
-  await pipeline.exec();
-  return true;
+  const stored = await redis.eval(
+    `
+    if redis.call("EXISTS", KEYS[1]) == 0 then
+      return 0
+    end
+    redis.call("RPUSH", KEYS[2], ARGV[1])
+    redis.call("LTRIM", KEYS[2], -tonumber(ARGV[2]), -1)
+    redis.call("EXPIRE", KEYS[2], tonumber(ARGV[3]))
+    redis.call("EXPIRE", KEYS[1], tonumber(ARGV[3]))
+    return 1
+    `,
+    [roomKey(roomId), messagesKey(roomId)],
+    [JSON.stringify(message), MESSAGE_LIMIT, ROOM_TTL_SECONDS],
+  );
+  return Number(stored) === 1;
 }
