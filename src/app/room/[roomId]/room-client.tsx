@@ -92,7 +92,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user: username, text: messageText }),
+        body: JSON.stringify({ username, text: messageText }),
       });
       const payload = (await response.json()) as { message?: ChatMessage; error?: string };
       if (!response.ok) {
