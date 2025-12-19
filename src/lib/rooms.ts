@@ -17,6 +17,12 @@ export type ChatMessage = {
   createdAt: number;
 };
 
+export type RoomMeta = {
+  ttlSeconds: number | null;
+  messageLimit: number;
+  messagesRemaining: number;
+};
+
 function roomKey(roomId: string) {
   return `room:${roomId}`;
 }
@@ -68,7 +74,8 @@ export async function getRoomWithMessages(roomId: string) {
   const pipeline = redis.pipeline();
   pipeline.get<string>(roomKey(roomId));
   pipeline.lrange<string>(messagesKey(roomId), 0, -1);
-  const [roomRaw, entriesRaw] = await pipeline.exec();
+  pipeline.ttl(roomKey(roomId));
+  const [roomRaw, entriesRaw, ttlRaw] = await pipeline.exec();
   if (!roomRaw) return null;
 
   const room = typeof roomRaw === "string" ? (JSON.parse(roomRaw) as ChatRoom) : (roomRaw as ChatRoom);
@@ -80,7 +87,16 @@ export async function getRoomWithMessages(roomId: string) {
     return entry as ChatMessage;
   });
 
-  return { room, messages };
+  const ttlSeconds = typeof ttlRaw === "number" && ttlRaw > 0 ? ttlRaw : null;
+  const messagesRemaining = Math.max(0, MESSAGE_LIMIT - messages.length);
+
+  const meta: RoomMeta = {
+    ttlSeconds,
+    messageLimit: MESSAGE_LIMIT,
+    messagesRemaining,
+  };
+
+  return { room, messages, meta };
 }
 
 export async function addMessage(roomId: string, message: ChatMessage) {

@@ -13,6 +13,12 @@ type ChatMessage = {
   createdAt: number;
 };
 
+type RoomMeta = {
+  ttlSeconds: number | null;
+  messageLimit: number;
+  messagesRemaining: number;
+};
+
 const STORAGE_KEY = "chatfn:username";
 
 export default function RoomClient({ roomId }: { roomId: string }) {
@@ -25,6 +31,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const [copied, setCopied] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  const [roomMeta, setRoomMeta] = useState<RoomMeta | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const pollRef = useRef<number | null>(null);
 
@@ -53,12 +60,13 @@ export default function RoomClient({ roomId }: { roomId: string }) {
         const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/messages`, {
           cache: "no-store",
         });
-        const payload = (await response.json()) as { messages?: ChatMessage[]; error?: string };
+        const payload = (await response.json()) as { messages?: ChatMessage[]; meta?: RoomMeta; error?: string };
         if (!response.ok) {
           throw new Error(payload?.error ?? "Unable to load messages.");
         }
         if (!cancelled) {
           setMessages(payload.messages ?? []);
+          setRoomMeta(payload.meta ?? null);
           setLoading(false);
           setError(null);
         }
@@ -113,6 +121,11 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       }
       if (payload.message) {
         setMessages((prev) => [...prev, payload.message as ChatMessage]);
+        setRoomMeta((prev) => {
+          if (!prev) return prev;
+          const nextRemaining = Math.max(0, prev.messagesRemaining - 1);
+          return { ...prev, messagesRemaining: nextRemaining };
+        });
       }
       setMessageText("");
     } catch (err) {
@@ -140,6 +153,27 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       })),
     [messages]
   );
+
+  const roomStatus = useMemo(() => {
+    if (!roomMeta) return null;
+    const { ttlSeconds, messageLimit, messagesRemaining } = roomMeta;
+    const usedMessages = Math.max(0, messageLimit - messagesRemaining);
+
+    let ttlLabel = "Room expires soon";
+    if (ttlSeconds && ttlSeconds > 0) {
+      const hours = Math.floor(ttlSeconds / 3600);
+      const minutes = Math.floor((ttlSeconds % 3600) / 60);
+      const parts: string[] = [];
+      if (hours > 0) parts.push(`${hours}h`);
+      if (minutes > 0 || parts.length === 0) parts.push(`${minutes}m`);
+      ttlLabel = `Room expires in ${parts.join(" ")}`;
+    }
+
+    return {
+      ttlLabel,
+      messageLabel: `${messagesRemaining} left • ${usedMessages}/${messageLimit} used`,
+    };
+  }, [roomMeta]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -213,6 +247,13 @@ export default function RoomClient({ roomId }: { roomId: string }) {
               </Button>
             )}
           </div>
+          {roomStatus ? (
+            <div className="flex flex-wrap items-center gap-3 text-xs text-foreground/60">
+              <span>{roomStatus.ttlLabel}</span>
+              <span className="text-foreground/40">•</span>
+              <span>{roomStatus.messageLabel}</span>
+            </div>
+          ) : null}
         </motion.section>
 
         <section className="border bg-background">

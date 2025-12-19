@@ -85,7 +85,7 @@ export const app = new Elysia()
       return { error: "Room not found." };
     }
 
-    return { messages: result.messages };
+    return { messages: result.messages, meta: result.meta };
   })
   .post(
     "/rooms/:roomId/messages",
