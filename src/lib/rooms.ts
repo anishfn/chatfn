@@ -58,13 +58,21 @@ export async function getRoom(roomId: string) {
   const redis = await getRedis();
   const raw = await redis.get<string>(roomKey(roomId));
   if (!raw) return null;
-  return JSON.parse(raw) as ChatRoom;
+  if (typeof raw === "string") {
+    return JSON.parse(raw) as ChatRoom;
+  }
+  return raw as ChatRoom;
 }
 
 export async function listMessages(roomId: string) {
   const redis = await getRedis();
   const entries = await redis.lrange<string>(messagesKey(roomId), 0, -1);
-  return entries.map((entry) => JSON.parse(entry) as ChatMessage);
+  return entries.map((entry) => {
+    if (typeof entry === "string") {
+      return JSON.parse(entry) as ChatMessage;
+    }
+    return entry as ChatMessage;
+  });
 }
 
 export async function addMessage(roomId: string, message: ChatMessage) {
