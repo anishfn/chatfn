@@ -41,8 +41,8 @@ export async function createRoom(createdBy: string) {
     };
 
     const result = await redis.set(roomKey(roomId), JSON.stringify(payload), {
-      NX: true,
-      EX: ROOM_TTL_SECONDS,
+      nx: true,
+      ex: ROOM_TTL_SECONDS,
     });
 
     if (result) {
@@ -56,14 +56,14 @@ export async function createRoom(createdBy: string) {
 
 export async function getRoom(roomId: string) {
   const redis = await getRedis();
-  const raw = await redis.get(roomKey(roomId));
+  const raw = await redis.get<string>(roomKey(roomId));
   if (!raw) return null;
   return JSON.parse(raw) as ChatRoom;
 }
 
 export async function listMessages(roomId: string) {
   const redis = await getRedis();
-  const entries = await redis.lRange(messagesKey(roomId), 0, -1);
+  const entries = await redis.lrange<string>(messagesKey(roomId), 0, -1);
   return entries.map((entry) => JSON.parse(entry) as ChatMessage);
 }
 
@@ -73,8 +73,8 @@ export async function addMessage(roomId: string, message: ChatMessage) {
   if (!exists) return false;
 
   const pipeline = redis.pipeline();
-  pipeline.rPush(messagesKey(roomId), JSON.stringify(message));
-  pipeline.lTrim(messagesKey(roomId), -MESSAGE_LIMIT, -1);
+  pipeline.rpush(messagesKey(roomId), JSON.stringify(message));
+  pipeline.ltrim(messagesKey(roomId), -MESSAGE_LIMIT, -1);
   pipeline.expire(messagesKey(roomId), ROOM_TTL_SECONDS);
   pipeline.expire(roomKey(roomId), ROOM_TTL_SECONDS);
   await pipeline.exec();
