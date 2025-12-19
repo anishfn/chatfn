@@ -10,6 +10,8 @@ const port = Number.parseInt(process.env.PORT ?? "3000", 10);
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
 const roomTtlSeconds = Number.parseInt(process.env.ROOM_TTL_SECONDS ?? "86400", 10);
 const messageLimit = Number.parseInt(process.env.MESSAGE_LIMIT ?? "200", 10);
+const wsMessageLimit = Number.parseInt(process.env.MESSAGE_RATE_LIMIT ?? "20", 10);
+const wsMessageWindowSeconds = Number.parseInt(process.env.MESSAGE_RATE_WINDOW_SECONDS ?? "10", 10);
 
 const app = next({ dev });
 const handle = app.getRequestHandler();
@@ -27,6 +29,34 @@ function roomKey(roomId) {
 
 function messagesKey(roomId) {
   return `room:${roomId}:messages`;
+}
+
+function getRequestIp(request) {
+  const forwarded = request.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.length > 0) {
+    const first = forwarded.split(",")[0]?.trim();
+    if (first) return first;
+  }
+
+  const realIp = request.headers["x-real-ip"] ?? request.headers["cf-connecting-ip"];
+  if (typeof realIp === "string" && realIp.length > 0) {
+    return realIp.trim();
+  }
+
+  return request.socket?.remoteAddress ?? "unknown";
+}
+
+async function rateLimit(key, limit, windowSeconds) {
+  if (limit <= 0 || windowSeconds <= 0) {
+    return { allowed: true };
+  }
+
+  const count = await redis.incr(key);
+  if (count === 1) {
+    await redis.expire(key, windowSeconds);
+  }
+
+  return { allowed: count <= limit };
 }
 
 async function loadRoom(roomId) {
@@ -92,6 +122,7 @@ wss.on("connection", async (socket, request) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host}`);
   const roomId = url.searchParams.get("roomId");
   const username = url.searchParams.get("username")?.trim() ?? "";
+  const ip = getRequestIp(request);
 
   if (!roomId || !username) {
     socket.send(JSON.stringify({ type: "error", error: "Missing roomId or username." }));
@@ -117,6 +148,16 @@ wss.on("connection", async (socket, request) => {
       payload = JSON.parse(data.toString());
     } catch {
       socket.send(JSON.stringify({ type: "error", error: "Invalid message payload." }));
+      return;
+    }
+
+    const limited = await rateLimit(
+      `ratelimit:ws:messages:${ip}:${roomId}`,
+      wsMessageLimit,
+      wsMessageWindowSeconds,
+    );
+    if (!limited.allowed) {
+      socket.send(JSON.stringify({ type: "error", error: "Too many messages. Please slow down." }));
       return;
     }
 

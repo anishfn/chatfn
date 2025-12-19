@@ -39,6 +39,14 @@ Create `.env.local` in the project root:
 REDIS_URL=redis://localhost:6379
 ROOM_TTL_SECONDS=86400
 MESSAGE_LIMIT=200
+ROOM_CREATE_LIMIT=5
+ROOM_CREATE_WINDOW_SECONDS=600
+ROOM_CREATE_DAILY_LIMIT=50
+ROOM_CREATE_DAILY_WINDOW_SECONDS=86400
+MESSAGE_RATE_LIMIT=20
+MESSAGE_RATE_WINDOW_SECONDS=10
+MESSAGE_RATE_HOURLY_LIMIT=200
+MESSAGE_RATE_HOURLY_WINDOW_SECONDS=3600
 ```
 
 4. Run the app:
@@ -63,6 +71,14 @@ pnpm start
 - `REDIS_URL`: Redis connection string.
 - `ROOM_TTL_SECONDS`: Room and message TTL in seconds.
 - `MESSAGE_LIMIT`: Max number of messages stored per room.
+- `ROOM_CREATE_LIMIT`: Max rooms per IP during `ROOM_CREATE_WINDOW_SECONDS`.
+- `ROOM_CREATE_WINDOW_SECONDS`: Window size for room creation rate limiting.
+- `ROOM_CREATE_DAILY_LIMIT`: Max rooms per IP during `ROOM_CREATE_DAILY_WINDOW_SECONDS`.
+- `ROOM_CREATE_DAILY_WINDOW_SECONDS`: Daily room creation window size.
+- `MESSAGE_RATE_LIMIT`: Max messages per IP during `MESSAGE_RATE_WINDOW_SECONDS`.
+- `MESSAGE_RATE_WINDOW_SECONDS`: Window size for message rate limiting.
+- `MESSAGE_RATE_HOURLY_LIMIT`: Max messages per IP during `MESSAGE_RATE_HOURLY_WINDOW_SECONDS`.
+- `MESSAGE_RATE_HOURLY_WINDOW_SECONDS`: Hourly message window size.
 - `PORT`: Server port (default 3000).
 
 ## Usage
