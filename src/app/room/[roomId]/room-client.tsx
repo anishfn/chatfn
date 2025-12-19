@@ -24,7 +24,7 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const socketRef = useRef<WebSocket | null>(null);
+  const pollRef = useRef<number | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -40,51 +40,39 @@ export default function RoomClient({ roomId }: { roomId: string }) {
 
   useEffect(() => {
     if (!username) return;
+    let cancelled = false;
 
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${protocol}://${window.location.host}/ws?roomId=${encodeURIComponent(roomId)}&username=${encodeURIComponent(username)}`);
-    socketRef.current = socket;
-
-    socket.onmessage = (event) => {
-      let payload: { type?: string; messages?: ChatMessage[]; message?: ChatMessage; error?: string };
+    const fetchMessages = async () => {
       try {
-        payload = JSON.parse(event.data as string);
-      } catch {
-        setError("Invalid server response.");
-        return;
-      }
-
-      if (payload.type === "history" && payload.messages) {
-        setMessages(payload.messages);
-        setLoading(false);
-        setError(null);
-        return;
-      }
-
-      if (payload.type === "message" && payload.message) {
-        setMessages((prev) => [...prev, payload.message as ChatMessage]);
-        setError(null);
-        return;
-      }
-
-      if (payload.type === "error" && payload.error) {
-        setError(payload.error);
-        setLoading(false);
+        const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/messages`, {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as { messages?: ChatMessage[]; error?: string };
+        if (!response.ok) {
+          throw new Error(payload?.error ?? "Unable to load messages.");
+        }
+        if (!cancelled) {
+          setMessages(payload.messages ?? []);
+          setLoading(false);
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Unable to load messages.");
+          setLoading(false);
+        }
       }
     };
 
-    socket.onerror = () => {
-      setError("Connection error.");
-      setLoading(false);
-    };
-
-    socket.onclose = () => {
-      socketRef.current = null;
-      setLoading(false);
-    };
+    void fetchMessages();
+    pollRef.current = window.setInterval(fetchMessages, 2000);
 
     return () => {
-      socket.close();
+      cancelled = true;
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
     };
   }, [roomId, username]);
 
@@ -100,16 +88,25 @@ export default function RoomClient({ roomId }: { roomId: string }) {
     setSending(true);
     setError(null);
 
-    const socket = socketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      setError("Connection lost. Refresh to reconnect.");
+    try {
+      const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user: username, text: messageText }),
+      });
+      const payload = (await response.json()) as { message?: ChatMessage; error?: string };
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Unable to send message.");
+      }
+      if (payload.message) {
+        setMessages((prev) => [...prev, payload.message as ChatMessage]);
+      }
+      setMessageText("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to send message.");
+    } finally {
       setSending(false);
-      return;
     }
-
-    socket.send(JSON.stringify({ user: username, text: messageText }));
-    setMessageText("");
-    setSending(false);
   }
 
   async function handleCopyInvite() {
