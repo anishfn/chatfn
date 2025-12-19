@@ -8,7 +8,7 @@ async function withApiBase(request: Request) {
     url.pathname = url.pathname.slice(4) || "/";
   }
 
-  const init: RequestInit = {
+  const init: RequestInit & { duplex?: "half" } = {
     method: request.method,
     headers: request.headers,
   };
