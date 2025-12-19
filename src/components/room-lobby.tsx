@@ -43,6 +43,13 @@ export default function RoomLobby() {
     }
   }, [invite]);
 
+  function updateUsername(next: string) {
+    const trimmed = next.trim().slice(0, 32);
+    if (!trimmed) return;
+    localStorage.setItem(STORAGE_KEY, trimmed);
+    setUsername(trimmed);
+  }
+
   async function handleCreate() {
     if (!username.trim()) return;
     setBusy(true);
@@ -100,7 +107,18 @@ export default function RoomLobby() {
             <p className="text-sm text-foreground/60">Private rooms that disappear when you are done.</p>
           </header>
 
-          <IdentityCard username={username} mode={mode} invite={invite} onInviteChange={setInvite} parsedCode={parsedCode} onCreate={handleCreate} onJoin={handleJoin} busy={busy} error={error} />
+          <IdentityCard
+            username={username}
+            onUsernameUpdate={updateUsername}
+            mode={mode}
+            invite={invite}
+            onInviteChange={setInvite}
+            parsedCode={parsedCode}
+            onCreate={handleCreate}
+            onJoin={handleJoin}
+            busy={busy}
+            error={error}
+          />
         </motion.section>
       </main>
     </div>
@@ -148,6 +166,7 @@ function SegmentButton({ active, onClick, icon, label }: { active: boolean; onCl
 
 function IdentityCard({
   username,
+  onUsernameUpdate,
   mode,
   invite,
   onInviteChange,
@@ -158,6 +177,7 @@ function IdentityCard({
   error,
 }: {
   username: string;
+  onUsernameUpdate: (value: string) => void;
   mode: "create" | "join";
   invite: string;
   onInviteChange: (value: string) => void;
@@ -171,7 +191,7 @@ function IdentityCard({
     <section className="w-full space-y-4">
       <div className="space-y-2">
         <h2 className="text-xs uppercase tracking-[0.2em] text-foreground/50">Identity</h2>
-        <UsernameRow username={username} />
+        <UsernameRow username={username} onUpdate={onUsernameUpdate} />
       </div>
 
       <AnimatePresence mode="wait">
@@ -197,8 +217,14 @@ function IdentityCard({
   );
 }
 
-function UsernameRow({ username }: { username: string }) {
+function UsernameRow({ username, onUpdate }: { username: string; onUpdate: (value: string) => void }) {
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(username);
+
+  useEffect(() => {
+    setDraft(username);
+  }, [username]);
 
   async function handleCopy() {
     try {
@@ -210,14 +236,57 @@ function UsernameRow({ username }: { username: string }) {
     }
   }
 
+  function handleSave() {
+    const trimmed = draft.trim().slice(0, 32);
+    if (!trimmed) return;
+    onUpdate(trimmed);
+    setEditing(false);
+  }
+
   return (
     <div className="overflow-hidden border bg-background">
       <div className="flex items-center justify-between">
-        <span className="min-w-0 truncate px-4 py-2 text-sm">{username}</span>
+        {editing ? (
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            className="min-w-0 flex-1 bg-transparent px-4 py-2 text-sm outline-none"
+            maxLength={32}
+            placeholder="Enter nickname"
+            autoComplete="off"
+          />
+        ) : (
+          <span className="min-w-0 truncate px-4 py-2 text-sm">{username}</span>
+        )}
 
-        <Button className="h-10 border-l" variant="ghost" size="icon-lg" onClick={handleCopy} aria-label="Copy username">
-          {copied ? <Check className="size-4" /> : <Copy className="size-3" />}
-        </Button>
+        <div className="flex items-center">
+          {editing ? (
+            <>
+              <Button className="h-10 border-l px-3 text-xs" variant="ghost" onClick={handleSave}>
+                Save
+              </Button>
+              <Button
+                className="h-10 border-l px-3 text-xs"
+                variant="ghost"
+                onClick={() => {
+                  setDraft(username);
+                  setEditing(false);
+                }}
+              >
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button className="h-10 border-l px-3 text-xs" variant="ghost" onClick={() => setEditing(true)}>
+                Edit
+              </Button>
+              <Button className="h-10 border-l" variant="ghost" size="icon-lg" onClick={handleCopy} aria-label="Copy username">
+                {copied ? <Check className="size-4" /> : <Copy className="size-3" />}
+              </Button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

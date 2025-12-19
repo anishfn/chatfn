@@ -23,6 +23,8 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const pollRef = useRef<number | null>(null);
 
@@ -37,6 +39,10 @@ export default function RoomClient({ roomId }: { roomId: string }) {
     localStorage.setItem(STORAGE_KEY, generated);
     setUsername(generated);
   }, []);
+
+  useEffect(() => {
+    setNameDraft(username);
+  }, [username]);
 
   useEffect(() => {
     if (!username) return;
@@ -82,6 +88,13 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   }, [messages]);
 
   const canSend = Boolean(messageText.trim()) && Boolean(username.trim()) && !sending;
+
+  function updateUsername(next: string) {
+    const trimmed = next.trim().slice(0, 32);
+    if (!trimmed) return;
+    localStorage.setItem(STORAGE_KEY, trimmed);
+    setUsername(trimmed);
+  }
 
   async function handleSend() {
     if (!canSend) return;
@@ -159,8 +172,46 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6 sm:py-10">
         <motion.section initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: "easeOut" }} className="space-y-1">
           <h1 className="text-lg font-semibold">Chatroom</h1>
-          <div className="text-xs text-foreground/60">
-            Signed in as <span className="font-medium text-foreground">{username || "..."}</span>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-foreground/60">
+            <span>
+              Signed in as <span className="font-medium text-foreground">{username || "..."}</span>
+            </span>
+            {editingName ? (
+              <>
+                <input
+                  value={nameDraft}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                  className="h-8 w-40 border bg-background px-2 text-xs text-foreground outline-none"
+                  maxLength={32}
+                  placeholder="New nickname"
+                  autoComplete="off"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    updateUsername(nameDraft);
+                    setEditingName(false);
+                  }}
+                >
+                  Save
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setNameDraft(username);
+                    setEditingName(false);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" variant="ghost" onClick={() => setEditingName(true)}>
+                Edit nickname
+              </Button>
+            )}
           </div>
         </motion.section>
 
