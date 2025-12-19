@@ -72,7 +72,7 @@ export async function addMessage(roomId: string, message: ChatMessage) {
   const exists = await redis.exists(roomKey(roomId));
   if (!exists) return false;
 
-  const pipeline = redis.multi();
+  const pipeline = redis.pipeline();
   pipeline.rPush(messagesKey(roomId), JSON.stringify(message));
   pipeline.lTrim(messagesKey(roomId), -MESSAGE_LIMIT, -1);
   pipeline.expire(messagesKey(roomId), ROOM_TTL_SECONDS);
