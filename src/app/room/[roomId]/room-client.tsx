@@ -1,10 +1,11 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Check, Copy, Loader2, Send } from "lucide-react";
+import { Check, Copy, Flag, Loader2, Send } from "lucide-react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 type ChatMessage = {
   id: string;
@@ -29,6 +30,8 @@ export default function RoomClient({ roomId }: { roomId: string }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [reportingId, setReportingId] = useState<string | null>(null);
+  const [reportedIds, setReportedIds] = useState<Set<string>>(new Set());
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [roomMeta, setRoomMeta] = useState<RoomMeta | null>(null);
@@ -132,6 +135,32 @@ export default function RoomClient({ roomId }: { roomId: string }) {
       setError(err instanceof Error ? err.message : "Unable to send message.");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function handleReport(messageId: string) {
+    if (reportingId || reportedIds.has(messageId)) return;
+    setReportingId(messageId);
+
+    try {
+      const response = await fetch(
+        `/api/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/report`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username }),
+        }
+      );
+      const payload = (await response.json()) as { ok?: boolean; error?: string };
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Unable to report message.");
+      }
+      setReportedIds((prev) => new Set(prev).add(messageId));
+      toast.success("Message reported. Thanks for flagging it.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Unable to report message.");
+    } finally {
+      setReportingId(null);
     }
   }
 
@@ -274,7 +303,25 @@ export default function RoomClient({ roomId }: { roomId: string }) {
                       <motion.div key={message.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }} className={["max-w-[80%] border px-3 py-2 text-sm", isSelf ? "ml-auto bg-accent/30" : "mr-auto bg-accent/10"].join(" ")}>
                         <div className="flex items-center justify-between gap-3 text-[11px] text-foreground/60">
                           <span className="truncate">{message.user}</span>
-                          <span>{message.timestamp}</span>
+                          <div className="flex shrink-0 items-center gap-2">
+                            {!isSelf ? (
+                              reportedIds.has(message.id) ? (
+                                <span className="text-foreground/40">Reported</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleReport(message.id)}
+                                  disabled={reportingId === message.id}
+                                  aria-label="Report message"
+                                  className="inline-flex items-center gap-1 text-foreground/40 transition-colors hover:text-destructive disabled:opacity-50"
+                                >
+                                  <Flag className="size-3" />
+                                  {reportingId === message.id ? "Reporting" : "Report"}
+                                </button>
+                              )
+                            ) : null}
+                            <span>{message.timestamp}</span>
+                          </div>
                         </div>
                         <p className="mt-1 whitespace-pre-wrap text-foreground">{message.text}</p>
                       </motion.div>

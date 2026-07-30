@@ -2,6 +2,7 @@ import { createServer } from "http";
 import { randomUUID } from "crypto";
 import { WebSocketServer } from "ws";
 import { createClient } from "redis";
+import { PostHog } from "posthog-node";
 import next from "next";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -12,6 +13,27 @@ const roomTtlSeconds = Number.parseInt(process.env.ROOM_TTL_SECONDS ?? "86400", 
 const messageLimit = Number.parseInt(process.env.MESSAGE_LIMIT ?? "200", 10);
 const wsMessageLimit = Number.parseInt(process.env.MESSAGE_RATE_LIMIT ?? "20", 10);
 const wsMessageWindowSeconds = Number.parseInt(process.env.MESSAGE_RATE_WINDOW_SECONDS ?? "10", 10);
+const wsMessageHourlyLimit = Number.parseInt(process.env.MESSAGE_RATE_HOURLY_LIMIT ?? "200", 10);
+const wsMessageHourlyWindowSeconds = Number.parseInt(process.env.MESSAGE_RATE_HOURLY_WINDOW_SECONDS ?? "3600", 10);
+const wsConnectLimit = Number.parseInt(process.env.WS_CONNECT_LIMIT ?? "30", 10);
+const wsConnectWindowSeconds = Number.parseInt(process.env.WS_CONNECT_WINDOW_SECONDS ?? "60", 10);
+const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS ?? "0", 10);
+
+const posthogKey = process.env.POSTHOG_API_KEY ?? process.env.NEXT_PUBLIC_POSTHOG_KEY ?? "";
+const posthogHost =
+  process.env.POSTHOG_HOST ?? process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com";
+const posthog = posthogKey
+  ? new PostHog(posthogKey, { host: posthogHost, flushAt: 1, flushInterval: 0 })
+  : null;
+
+function captureEvent(event, distinctId, properties) {
+  if (!posthog) return;
+  try {
+    posthog.capture({ distinctId: distinctId || "anonymous", event, properties });
+  } catch {
+    // Analytics must never break the socket path.
+  }
+}
 
 const app = next({ dev });
 const handle = app.getRequestHandler();
@@ -32,15 +54,26 @@ function messagesKey(roomId) {
 }
 
 function getRequestIp(request) {
-  const forwarded = request.headers["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.length > 0) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first) return first;
-  }
+  // Only trust client-supplied forwarding headers when a trusted proxy is
+  // configured; the client IP added by our own proxy is the Nth entry from the
+  // right of X-Forwarded-For (see TRUST_PROXY_HOPS in src/server/ip.ts).
+  if (trustProxyHops > 0) {
+    const forwarded = request.headers["x-forwarded-for"];
+    if (typeof forwarded === "string" && forwarded.length > 0) {
+      const parts = forwarded
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (parts.length > 0) {
+        const clientIp = parts[Math.max(0, parts.length - trustProxyHops)];
+        if (clientIp) return clientIp;
+      }
+    }
 
-  const realIp = request.headers["x-real-ip"] ?? request.headers["cf-connecting-ip"];
-  if (typeof realIp === "string" && realIp.length > 0) {
-    return realIp.trim();
+    const realIp = request.headers["x-real-ip"] ?? request.headers["cf-connecting-ip"];
+    if (typeof realIp === "string" && realIp.length > 0) {
+      return realIp.trim();
+    }
   }
 
   return request.socket?.remoteAddress ?? "unknown";
@@ -113,6 +146,16 @@ await app.prepare();
 await redis.connect();
 
 const server = createServer((req, res) => {
+  // Stamp the real socket peer address as a trusted header, overwriting any
+  // client-supplied value, so the HTTP API (which only sees a reconstructed web
+  // Request without socket access) can attribute requests to an IP. See
+  // getRequestIp in src/server/ip.ts.
+  const peer = req.socket?.remoteAddress;
+  if (peer) {
+    req.headers["x-chatfn-remote-addr"] = peer;
+  } else {
+    delete req.headers["x-chatfn-remote-addr"];
+  }
   handle(req, res);
 });
 
@@ -151,12 +194,21 @@ wss.on("connection", async (socket, request) => {
       return;
     }
 
-    const limited = await rateLimit(
-      `ratelimit:ws:messages:${ip}:${roomId}`,
-      wsMessageLimit,
-      wsMessageWindowSeconds,
-    );
-    if (!limited.allowed) {
+    // Share the same Redis keys as the HTTP POST route so a client cannot get a
+    // second budget by switching transports.
+    const perWindow = await rateLimit(`ratelimit:messages:${ip}`, wsMessageLimit, wsMessageWindowSeconds);
+    const hourly = perWindow.allowed
+      ? await rateLimit(
+          `ratelimit:messages:${ip}:${roomId}:hourly`,
+          wsMessageHourlyLimit,
+          wsMessageHourlyWindowSeconds,
+        )
+      : { allowed: false };
+    if (!perWindow.allowed || !hourly.allowed) {
+      captureEvent("rate_limit_exceeded", ip, {
+        route: perWindow.allowed ? "ws_message_hourly" : "ws_message",
+        room_id: roomId,
+      });
       socket.send(JSON.stringify({ type: "error", error: "Too many messages. Please slow down." }));
       return;
     }
@@ -196,9 +248,26 @@ server.on("upgrade", (request, socket, head) => {
     return;
   }
 
-  wss.handleUpgrade(request, socket, head, (client) => {
-    wss.emit("connection", client, request);
-  });
+  const ip = getRequestIp(request);
+  void (async () => {
+    const limited = await rateLimit(`ratelimit:ws:connect:${ip}`, wsConnectLimit, wsConnectWindowSeconds);
+    if (!limited.allowed) {
+      captureEvent("rate_limit_exceeded", ip, {
+        route: "ws_connect",
+        limit: wsConnectLimit,
+        window_seconds: wsConnectWindowSeconds,
+      });
+      socket.write(
+        `HTTP/1.1 429 Too Many Requests\r\nRetry-After: ${wsConnectWindowSeconds}\r\nConnection: close\r\n\r\n`,
+      );
+      socket.destroy();
+      return;
+    }
+
+    wss.handleUpgrade(request, socket, head, (client) => {
+      wss.emit("connection", client, request);
+    });
+  })();
 });
 
 server.listen(port, () => {
