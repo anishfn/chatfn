@@ -3,6 +3,7 @@ import { getRedis } from "@/lib/redis";
 
 const ROOM_TTL_SECONDS = Number.parseInt(process.env.ROOM_TTL_SECONDS ?? "86400", 10);
 const MESSAGE_LIMIT = Number.parseInt(process.env.MESSAGE_LIMIT ?? "200", 10);
+const REPORT_LIMIT = Number.parseInt(process.env.REPORT_STORE_LIMIT ?? "500", 10);
 
 export type ChatRoom = {
   id: string;
@@ -23,12 +24,24 @@ export type RoomMeta = {
   messagesRemaining: number;
 };
 
+export type MessageReport = {
+  id: string;
+  messageId: string;
+  reason: string;
+  reporter: string;
+  createdAt: number;
+};
+
 function roomKey(roomId: string) {
   return `room:${roomId}`;
 }
 
 function messagesKey(roomId: string) {
   return `room:${roomId}:messages`;
+}
+
+function reportsKey(roomId: string) {
+  return `room:${roomId}:reports`;
 }
 
 function generateRoomId() {
@@ -116,4 +129,32 @@ export async function addMessage(roomId: string, message: ChatMessage) {
     [JSON.stringify(message), MESSAGE_LIMIT, ROOM_TTL_SECONDS],
   );
   return Number(stored) === 1;
+}
+
+export async function addReport(
+  roomId: string,
+  report: MessageReport,
+): Promise<"ok" | "room_not_found" | "message_not_found"> {
+  const result = await getRoomWithMessages(roomId);
+  if (!result) return "room_not_found";
+
+  const messageExists = result.messages.some((message) => message.id === report.messageId);
+  if (!messageExists) return "message_not_found";
+
+  const redis = await getRedis();
+  const stored = await redis.eval(
+    `
+    if redis.call("EXISTS", KEYS[1]) == 0 then
+      return 0
+    end
+    redis.call("RPUSH", KEYS[2], ARGV[1])
+    redis.call("LTRIM", KEYS[2], -tonumber(ARGV[2]), -1)
+    redis.call("EXPIRE", KEYS[2], tonumber(ARGV[3]))
+    return 1
+    `,
+    [roomKey(roomId), reportsKey(roomId)],
+    [JSON.stringify(report), REPORT_LIMIT, ROOM_TTL_SECONDS],
+  );
+
+  return Number(stored) === 1 ? "ok" : "room_not_found";
 }

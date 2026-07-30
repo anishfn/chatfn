@@ -79,6 +79,16 @@ pnpm start
 - `MESSAGE_RATE_WINDOW_SECONDS`: Window size for message rate limiting.
 - `MESSAGE_RATE_HOURLY_LIMIT`: Max messages per IP during `MESSAGE_RATE_HOURLY_WINDOW_SECONDS`.
 - `MESSAGE_RATE_HOURLY_WINDOW_SECONDS`: Hourly message window size.
+- `READ_RATE_LIMIT`: Max read requests (`GET /rooms/:id`, `GET /rooms/:id/messages`) per IP during `READ_RATE_WINDOW_SECONDS` (default 120).
+- `READ_RATE_WINDOW_SECONDS`: Window size for read rate limiting (default 60).
+- `REPORT_RATE_LIMIT`: Max message reports per IP during `REPORT_RATE_WINDOW_SECONDS` (default 10).
+- `REPORT_RATE_WINDOW_SECONDS`: Window size for report rate limiting (default 60).
+- `REPORT_STORE_LIMIT`: Max reports retained per room (default 500).
+- `WS_CONNECT_LIMIT`: Max `/ws` connection upgrades per IP during `WS_CONNECT_WINDOW_SECONDS` (default 30).
+- `WS_CONNECT_WINDOW_SECONDS`: Window size for WebSocket connection rate limiting (default 60).
+- `TRUST_PROXY_HOPS`: Number of trusted reverse proxies in front of the app. `0` (default) ignores client-supplied `X-Forwarded-For`; set to the real hop count when deployed behind a proxy so rate limits key off the real client IP.
+- `POSTHOG_API_KEY` (or `NEXT_PUBLIC_POSTHOG_KEY`): PostHog project key. When set, 429s and message reports are captured as events. Analytics is a no-op when unset.
+- `POSTHOG_HOST`: PostHog host (default `https://us.i.posthog.com`).
 - `PORT`: Server port (default 3000).
 
 ## Usage
@@ -95,6 +105,9 @@ The Elysia app is mounted at `/api` via a catch-all Next.js route.
 - `GET /api/rooms/:roomId` → `{ room }`
 - `GET /api/rooms/:roomId/messages` → `{ messages }`
 - `POST /api/rooms/:roomId/messages` → `{ message }`
+- `POST /api/rooms/:roomId/messages/:messageId/report` → `{ ok: true }`
+
+All routes are rate limited per IP. Throttled responses return `429` with `Retry-After` and `X-RateLimit-*` headers.
 
 ## Notes
 
